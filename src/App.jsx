@@ -6,7 +6,7 @@ import {
   Bus, User, MapPin, CreditCard, HeartPulse, ChevronRight, Milestone,
   Calendar, Navigation, Search, Plus, Pencil, X, Map as MapIcon, List, Trash2,
   Home, Sun, Moon, Users, Settings, UserPlus, LogOut, Building2, Menu,
-  Download, Printer, FileSpreadsheet, Upload, Lock,
+  Download, Printer, FileSpreadsheet, Upload, Lock, Pin, PinOff, Route,
 } from "lucide-react";
 
 const FONT_IMPORT = `
@@ -755,7 +755,7 @@ const emptyChico = (instituciones, prestaciones, localidades, obrasSociales) => 
     nombre: "", dni: "", prestacion: pres ? pres.nombre : "",
     obraSocial: obrasSociales && obrasSociales[0] ? obrasSociales[0].nombre : "",
     domicilio: "", localidad: localidades && localidades[0] ? localidades[0].nombre : "",
-    dias: "", institucionId, kmDesde: 0, lat: inst?.lat, lng: inst?.lng,
+    dias: "", institucionId, kmDesde: 0, lat: inst?.lat, lng: inst?.lng, coordsManual: "",
   };
 };
 const emptyUsuario = (recorridos) => ({ nombre: "", rol: "Chofer", recorridoId: recorridos[0]?.id || "", usuario: "" });
@@ -1081,6 +1081,10 @@ export default function App() {
   const [diasPorMes, setDiasPorMes] = useState(20);
   const [query, setQuery] = useState("");
   const [view, setView] = useState("mapa");
+  const [expandedChico, setExpandedChico] = useState(null);
+  const [recorridosPanelOpen, setRecorridosPanelOpen] = useState(true);
+  const [optimizando, setOptimizando] = useState(false);
+  const [optimizarMsg, setOptimizarMsg] = useState("");
   const [modal, setModal] = useState(null);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [isDesktop, setIsDesktop] = useState(true);
@@ -1144,6 +1148,59 @@ export default function App() {
   function openNuevoRecorrido() { setModal({ type: "recorrido", mode: "new", draft: emptyRecorrido() }); }
   function openEditarRecorrido() { setModal({ type: "recorrido", mode: "edit", draft: { ...recorrido } }); }
   function openNuevoConcurrente() { setModal({ type: "concurrente", mode: "new", draft: emptyChico(instituciones, prestaciones, localidades, obrasSociales) }); }
+
+  async function optimizarOrden() {
+    if (!recorrido || recorrido.chicos.length < 3) {
+      setOptimizarMsg("Hacen falta al menos 3 concurrentes para optimizar el orden.");
+      return;
+    }
+    setOptimizando(true);
+    setOptimizarMsg("");
+    try {
+      const maps = await loadGoogleMaps();
+      const institucionesUsadas = [];
+      recorrido.chicos.forEach((c) => {
+        if (!institucionesUsadas.find((i) => i.id === c.institucionId)) {
+          const inst = instituciones.find((i) => i.id === c.institucionId);
+          if (inst) institucionesUsadas.push(inst);
+        }
+      });
+      const domicilios = recorrido.chicos.map((c) => ({ lat: c.lat, lng: c.lng }));
+      const destinoInst = institucionesUsadas[institucionesUsadas.length - 1];
+      const destination = destinoInst ? { lat: destinoInst.lat, lng: destinoInst.lng } : domicilios[domicilios.length - 1];
+      const origin = domicilios[0];
+      const waypointOriginalIndices = destinoInst
+        ? domicilios.map((_, i) => i).slice(1)
+        : domicilios.map((_, i) => i).slice(1, -1);
+      const waypoints = waypointOriginalIndices.map((i) => ({ location: domicilios[i], stopover: true }));
+
+      const directionsService = new maps.DirectionsService();
+      directionsService.route(
+        { origin, destination, waypoints, travelMode: maps.TravelMode.DRIVING, optimizeWaypoints: true },
+        async (result, statusResult) => {
+          if (statusResult === "OK") {
+            const order = result.routes[0].waypoint_order || waypointOriginalIndices.map((_, i) => i);
+            const sequence = [0, ...order.map((i) => waypointOriginalIndices[i])];
+            if (!destinoInst) sequence.push(domicilios.length - 1);
+            const chicosOrdenados = sequence.map((origIdx) => recorrido.chicos[origIdx]);
+            const { id: rId, ...rRest } = recorrido;
+            await saveItem("recorridos", recorrido.id, { ...rRest, chicos: chicosOrdenados });
+            setOptimizarMsg("Listo — el orden se actualizó según la ruta más corta por calles.");
+          } else {
+            setOptimizarMsg(
+              statusResult === "ZERO_RESULTS"
+                ? "No se encontró un camino por calles entre esos puntos."
+                : `No se pudo optimizar el orden (${statusResult}).`
+            );
+          }
+          setOptimizando(false);
+        }
+      );
+    } catch (err) {
+      setOptimizarMsg("No se pudo optimizar: " + err.message);
+      setOptimizando(false);
+    }
+  }
   function openEditarConcurrente(i) { setModal({ type: "concurrente", mode: "edit", index: i, draft: { ...recorrido.chicos[i] } }); }
   function openNuevoUsuario() { setModal({ type: "usuario", mode: "new", draft: emptyUsuario(recorridos) }); }
   function openEditarUsuario(u) { setModal({ type: "usuario", mode: "edit", id: u.id, draft: { ...u } }); }
@@ -1168,7 +1225,11 @@ export default function App() {
       }
     } else if (modal.type === "concurrente") {
       let chicoData = modal.draft;
-      if (chicoData.domicilio && chicoData.domicilio.trim()) {
+      const manual = (chicoData.coordsManual || "").trim();
+      const manualMatch = /^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/.exec(manual);
+      if (manualMatch) {
+        chicoData = { ...chicoData, lat: parseFloat(manualMatch[1]), lng: parseFloat(manualMatch[2]) };
+      } else if (chicoData.domicilio && chicoData.domicilio.trim()) {
         const coords = await geocodeAddress(chicoData.domicilio).catch(() => null);
         if (coords) chicoData = { ...chicoData, lat: coords.lat, lng: coords.lng };
       }
@@ -1219,6 +1280,8 @@ export default function App() {
     recorridos
       .filter((r) => exportRecorridoIds.includes(r.id))
       .forEach((r) => {
+        const kmDiarioR = r.kmIda * 2;
+        const kmMensualR = kmDiarioR * diasPorMes;
         r.chicos
           .filter((c) => exportInstitucionIds.includes(c.institucionId))
           .forEach((c) => {
@@ -1234,6 +1297,10 @@ export default function App() {
               Días: c.dias,
               Domicilio: c.domicilio,
               Institución: inst ? inst.nombre : "",
+              "Distancia a institución (km)": c.kmDesde || 0,
+              "Km ida recorrido": r.kmIda,
+              "Km diario recorrido": kmDiarioR,
+              [`Km mensual recorrido (${diasPorMes} días)`]: Math.round(kmMensualR),
             };
             if (exportIncluirTransporte) {
               base.Chofer = r.chofer;
@@ -1324,15 +1391,22 @@ export default function App() {
     const GREEN_RGB = "0.247 0.424 0.318";
     const GRAY_RGB = "0.82 0.85 0.82";
     const marginX = 40, tableW = 515, top = 50, bottom = 792;
-    const cols = [
-      { key: "idx", label: "#", x: 40, w: 14 },
-      { key: "nombre", label: "Concurrente", x: 54, w: 85 },
-      { key: "dni", label: "DNI", x: 141, w: 58 },
-      { key: "institucion", label: "Institución", x: 201, w: 72 },
-      { key: "obraSocial", label: "O. social", x: 275, w: 44 },
-      { key: "dias", label: "Días", x: 321, w: 128 },
-      { key: "prestacion", label: "Prestación", x: 451, w: 104 },
+    const colDefs = [
+      { key: "idx", label: "#", w: 14 },
+      { key: "nombre", label: "Concurrente", w: 78 },
+      { key: "dni", label: "DNI", w: 52 },
+      { key: "institucion", label: "Institución", w: 64 },
+      { key: "obraSocial", label: "O. social", w: 40 },
+      { key: "km", label: "Km", w: 34 },
+      { key: "dias", label: "Días", w: 95 },
+      { key: "prestacion", label: "Prestación", w: 90 },
     ];
+    let cursorX = marginX;
+    const cols = colDefs.map((c) => {
+      const withX = { ...c, x: cursorX };
+      cursorX += c.w;
+      return withX;
+    });
 
     let pages = [{ texts: [], hlines: [] }];
     let y = top;
@@ -1383,8 +1457,9 @@ export default function App() {
       y += 18;
       if (exportIncluirTransporte) {
         addWrappedText(`Chofer: ${r.chofer}   Auxiliar: ${r.auxiliar}   Vehiculo: ${r.vehiculo}   Patente: ${r.patente}`, marginX, tableW, 9, false, 12);
-        y += 4;
       }
+      addText(`Km ida: ${r.kmIda.toFixed(1)}   Km diario (ida+vuelta): ${(r.kmIda * 2).toFixed(1)}   Km mensual (${diasPorMes} dias): ${Math.round(r.kmIda * 2 * diasPorMes)}`, marginX, 9);
+      y += 16;
 
       drawTableHeader();
 
@@ -1403,6 +1478,7 @@ export default function App() {
           dni: c.dni,
           institucion: inst ? inst.nombre : "-",
           obraSocial: c.obraSocial,
+          km: c.kmDesde ? c.kmDesde.toFixed(1) : "-",
           dias: c.dias,
           prestacion: c.prestacion,
         };
@@ -1556,34 +1632,40 @@ export default function App() {
       <div className="flex-1 flex flex-col md:flex-row min-w-0">
         {section === "recorridos" && (
           <>
-            <aside className="hidden md:flex shrink-0 md:border-r border-[#E2E7E2] bg-white flex-col" style={{ width: isDesktop ? 280 : "100%" }}>
-              <div className="px-5 pt-5 pb-3">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <span className="text-[15px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>Recorridos</span>
-                    <div className="text-[11px] flex items-center gap-1 mt-0.5" style={{ color: MUTED }}>
-                      {turno === "mañana" ? <Sun size={11} /> : <Moon size={11} />} Turno {turno}
+            {recorridosPanelOpen ? (
+              <aside className="hidden md:flex shrink-0 md:border-r border-[#E2E7E2] bg-white flex-col" style={{ width: isDesktop ? 280 : "100%" }}>
+                <div className="px-5 pt-5 pb-3">
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <span className="text-[15px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>Recorridos</span>
+                      <div className="text-[11px] flex items-center gap-1 mt-0.5" style={{ color: MUTED }}>
+                        {turno === "mañana" ? <Sun size={11} /> : <Moon size={11} />} Turno {turno}
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setRecorridosPanelOpen(false)} title="Ocultar panel" className="p-1.5 rounded-lg" style={{ color: GREEN, background: "#EEF3EC" }}>
+                        <Pin size={14} />
+                      </button>
+                      <button onClick={openNuevoRecorrido} className="flex items-center gap-1 text-[12px] rounded-lg px-2.5 py-1.5 text-white" style={{ background: GREEN }}>
+                        <Plus size={13} /> Nuevo
+                      </button>
                     </div>
                   </div>
-                  <button onClick={openNuevoRecorrido} className="flex items-center gap-1 text-[12px] rounded-lg px-2.5 py-1.5 text-white" style={{ background: GREEN }}>
-                    <Plus size={13} /> Nuevo
-                  </button>
+                  <div className="mt-3 relative">
+                    <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B978F]" />
+                    <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar recorrido o localidad"
+                      className="w-full text-[13px] rounded-lg border border-[#E2E7E2] bg-[#F9FAF8] pl-8 pr-3 py-2 outline-none focus:border-[#3F6C51]" />
+                  </div>
                 </div>
-                <div className="mt-3 relative">
-                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8B978F]" />
-                  <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar recorrido o localidad"
-                    className="w-full text-[13px] rounded-lg border border-[#E2E7E2] bg-[#F9FAF8] pl-8 pr-3 py-2 outline-none focus:border-[#3F6C51]" />
-                </div>
-              </div>
-              <nav
-                className="flex-1 px-3 pb-3 md:pb-4"
-                style={{ display: "flex", flexDirection: isDesktop ? "column" : "row", gap: isDesktop ? 4 : 8, overflowY: isDesktop ? "auto" : "visible", overflowX: isDesktop ? "visible" : "auto" }}
-              >
-                {filtered.map((r) => {
-                  const active = r.id === selectedId;
-                  return (
-                    <button key={r.id} onClick={() => setSelectedId(r.id)}
-                      className="text-left rounded-lg px-3 py-3 transition-colors"
+                <nav
+                  className="flex-1 px-3 pb-3 md:pb-4"
+                  style={{ display: "flex", flexDirection: isDesktop ? "column" : "row", gap: isDesktop ? 4 : 8, overflowY: isDesktop ? "auto" : "visible", overflowX: isDesktop ? "visible" : "auto" }}
+                >
+                  {filtered.map((r) => {
+                    const active = r.id === selectedId;
+                    return (
+                      <button key={r.id} onClick={() => setSelectedId(r.id)}
+                        className="text-left rounded-lg px-3 py-3 transition-colors"
                       style={{
                         background: active ? "#EEF3EC" : "transparent",
                         border: active ? "1px solid #C9DBC9" : "1px solid #EDF0ED",
@@ -1600,8 +1682,15 @@ export default function App() {
                     </button>
                   );
                 })}
-              </nav>
-            </aside>
+                </nav>
+              </aside>
+            ) : (
+              <div className="hidden md:flex shrink-0 border-r border-[#E2E7E2] bg-white flex-col items-center pt-5">
+                <button onClick={() => setRecorridosPanelOpen(true)} title="Mostrar panel de recorridos" className="p-2 rounded-lg" style={{ color: GREEN, background: "#EEF3EC" }}>
+                  <PinOff size={14} />
+                </button>
+              </div>
+            )}
 
             <main className="flex-1 overflow-y-auto">
               <div className="max-w-[820px] mx-auto px-4 sm:px-8 py-6 sm:py-8">
@@ -1650,40 +1739,76 @@ export default function App() {
 
                 <div className="mt-7 grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5">
                   <div className="rounded-xl bg-white border border-[#E2E7E2] overflow-hidden">
-                    <div className="px-5 py-4 border-b border-[#E2E7E2] flex items-center justify-between">
+                    <div className="px-5 py-4 border-b border-[#E2E7E2] flex items-center justify-between gap-2 flex-wrap">
                       <h3 className="text-[15px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>Concurrentes del recorrido</h3>
-                      <button onClick={openNuevoConcurrente} className="flex items-center gap-1 text-[11.5px] rounded-full px-2.5 py-1.5 text-white" style={{ background: GREEN }}>
-                        <Plus size={12} /> Agregar
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button onClick={optimizarOrden} disabled={optimizando} className="flex items-center gap-1 text-[11.5px] rounded-full px-2.5 py-1.5 border" style={{ borderColor: "#E2E7E2", color: optimizando ? MUTED : GREEN }}>
+                          <Route size={12} /> {optimizando ? "Optimizando..." : "Optimizar orden"}
+                        </button>
+                        <button onClick={openNuevoConcurrente} className="flex items-center gap-1 text-[11.5px] rounded-full px-2.5 py-1.5 text-white" style={{ background: GREEN }}>
+                          <Plus size={12} /> Agregar
+                        </button>
+                      </div>
                     </div>
+                    {optimizarMsg && (
+                      <div className="px-5 py-2 text-[11.5px]" style={{ background: optimizarMsg.startsWith("No") ? "#FBEEEC" : "#EEF3EC", color: optimizarMsg.startsWith("No") ? "#B5533E" : GREEN }}>
+                        {optimizarMsg}
+                      </div>
+                    )}
                     <div className="divide-y divide-[#EDF0ED]">
                       {recorrido.chicos.map((c, i) => {
                         const inst = instituciones.find((x) => x.id === c.institucionId);
+                        const isOpen = expandedChico === i;
                         return (
-                          <div key={i} className="px-5 py-4">
-                            <div className="flex items-center justify-between gap-2">
-                              <span className="text-[14px] flex items-center gap-1.5" style={{ color: INK, fontWeight: 500 }}>
-                                <span className="inline-flex items-center justify-center rounded-full text-[10px] w-4 h-4" style={{ background: "#EEF3EC", color: GREEN }}>{i + 1}</span>
-                                {c.nombre}
+                          <div key={i} className="px-5 py-3">
+                            <button
+                              onClick={() => setExpandedChico(isOpen ? null : i)}
+                              className="w-full flex items-center justify-between gap-2 text-left"
+                            >
+                              <span className="text-[14px] flex items-center gap-1.5 min-w-0" style={{ color: INK, fontWeight: 500 }}>
+                                <span className="inline-flex items-center justify-center rounded-full text-[10px] w-4 h-4 shrink-0" style={{ background: "#EEF3EC", color: GREEN }}>{i + 1}</span>
+                                <span className="truncate">{c.nombre}</span>
                               </span>
-                              <div className="flex items-center gap-2 shrink-0">
-                                {c.dni && <span className="text-[11.5px]" style={{ color: MUTED, fontFamily: "'IBM Plex Mono', monospace" }}>DNI {c.dni}</span>}
-                                <button onClick={() => openEditarConcurrente(i)}><Pencil size={13} color={MUTED} /></button>
-                              </div>
-                            </div>
-                            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" style={{ color: "#5B6B63" }}>
-                              {c.prestacion && <span className="flex items-center gap-1"><HeartPulse size={12} /> {c.prestacion}</span>}
-                              {c.obraSocial && <span className="flex items-center gap-1">Obra social: {c.obraSocial}</span>}
-                              {c.dias && <span className="flex items-center gap-1"><Calendar size={12} /> {c.dias}</span>}
-                            </div>
-                            {(c.domicilio || c.localidad) && (
-                              <div className="mt-1.5 flex items-center gap-1 text-[12px]" style={{ color: MUTED }}>
-                                <MapPin size={12} /> {[c.domicilio, c.localidad].filter(Boolean).join(" · ")}
+                              <span className="flex items-center gap-2 shrink-0">
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); setExpandedChico(isOpen ? null : i); }}
+                                  className="text-[11px] rounded-full px-2.5 py-1 border"
+                                  style={{ borderColor: "#E2E7E2", color: MUTED }}
+                                >
+                                  {isOpen ? "Ocultar" : "Ver datos"}
+                                </span>
+                                <ChevronRight size={14} color={MUTED} style={{ transform: isOpen ? "rotate(90deg)" : "none", transition: "transform 0.15s" }} />
+                              </span>
+                            </button>
+
+                            {isOpen && (
+                              <div className="mt-3 pl-5">
+                                <div className="flex items-center justify-between gap-2 mb-2">
+                                  {c.dni && <span className="text-[11.5px]" style={{ color: MUTED, fontFamily: "'IBM Plex Mono', monospace" }}>DNI {c.dni}</span>}
+                                  <button onClick={() => openEditarConcurrente(i)} className="flex items-center gap-1 text-[11.5px] ml-auto" style={{ color: GREEN }}>
+                                    <Pencil size={12} /> Editar
+                                  </button>
+                                </div>
+                                <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[12px]" style={{ color: "#5B6B63" }}>
+                                  {c.prestacion && <span className="flex items-center gap-1"><HeartPulse size={12} /> {c.prestacion}</span>}
+                                  {c.obraSocial && <span className="flex items-center gap-1">Obra social: {c.obraSocial}</span>}
+                                  {c.dias && <span className="flex items-center gap-1"><Calendar size={12} /> {c.dias}</span>}
+                                </div>
+                                {(c.domicilio || c.localidad) && (
+                                  <div className="mt-1.5 flex items-center gap-1 text-[12px]" style={{ color: MUTED }}>
+                                    <MapPin size={12} /> {[c.domicilio, c.localidad].filter(Boolean).join(" · ")}
+                                  </div>
+                                )}
+                                <div className="mt-1.5 flex items-center gap-1 text-[11.5px]" style={{ color: GREEN }}>
+                                  <Building2 size={12} /> {inst ? inst.nombre : "Sin institución asignada"}
+                                </div>
+                                {typeof c.kmDesde === "number" && c.kmDesde > 0 && (
+                                  <div className="mt-1.5 flex items-center gap-1 text-[11.5px]" style={{ color: OCHRE }}>
+                                    <Milestone size={12} /> {c.kmDesde.toFixed(1)} km desde {inst ? inst.nombre : "la institución"}
+                                  </div>
+                                )}
                               </div>
                             )}
-                            <div className="mt-1.5 flex items-center gap-1 text-[11.5px]" style={{ color: GREEN }}>
-                              <Building2 size={12} /> {inst ? inst.nombre : "Sin institución asignada"}
-                            </div>
                           </div>
                         );
                       })}
@@ -2053,6 +2178,11 @@ export default function App() {
             options={[{ value: "", label: "Sin especificar" }, ...localidades.map((l) => ({ value: l.nombre, label: `${l.nombre}, ${l.provincia}` }))]} />
           <Field label="Días de concurrencia" value={d.dias} onChange={(v) => setModal({ ...modal, draft: { ...d, dias: v } })} />
           <Field label="Domicilio" value={d.domicilio} onChange={(v) => setModal({ ...modal, draft: { ...d, domicilio: v } })} />
+          <Field label="Coordenadas manuales (lat, lng)" value={d.coordsManual || ""} onChange={(v) => setModal({ ...modal, draft: { ...d, coordsManual: v } })} />
+          <p className="text-[11px]" style={{ color: MUTED }}>
+            Usar solo si el concurrente no tiene domicilio con calle y número (ej. zona rural). Formato: -26.144265, -59.599022 — si se completa, tiene prioridad sobre el domicilio.
+          </p>
+          <Field label="Distancia a la institución (km)" type="number" value={d.kmDesde || 0} onChange={(v) => setModal({ ...modal, draft: { ...d, kmDesde: v } })} />
           <p className="text-[11px]" style={{ color: MUTED }}>En la versión final, el domicilio se geocodifica solo al guardar. Obra social, localidad, institución y prestación se cargan y editan desde Datos generales.</p>
         </Modal>
       )}

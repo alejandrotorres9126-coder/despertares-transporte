@@ -937,6 +937,20 @@ function normInstitucionNombre(text) {
   if (t.includes("CENTRO")) return "Centro de Día";
   return text.trim() ? titleCase(text.trim()) : "Sin especificar";
 }
+// Tolera guiones "raros" (en dash, em dash, signo menos matemático) y espacios no separables
+// que a veces quedan al pegar coordenadas desde Google Maps u otras fuentes.
+function parseCoordsText(text) {
+  const cleaned = String(text || "")
+    .replace(/\u00a0/g, " ")
+    .replace(/[\u2010-\u2015\u2212]/g, "-")
+    .trim();
+  const m = /^(-?\d+[.,]?\d*)\s*,\s*(-?\d+[.,]?\d*)$/.exec(cleaned);
+  if (!m) return null;
+  const lat = parseFloat(m[1].replace(",", "."));
+  const lng = parseFloat(m[2].replace(",", "."));
+  if (isNaN(lat) || isNaN(lng)) return null;
+  return { lat, lng };
+}
 const IMPORT_MARKERS = ["Datos de veh", "Datos chofer", "Datos auxiliar", "Datos Auxiliar", "AUXILIAR:", "TRANSPORTE:", "TURNO:", "Horario de"];
 function isImportMarker(text) { return IMPORT_MARKERS.some((m) => text.startsWith(m)); }
 
@@ -970,9 +984,9 @@ function parseTransporteSheet(rows) {
         const institucionTxt = normText(r[5]);
         const coords = normText(r[6]);
         const kmRaw = r[7];
-        let lat = null, lng = null;
-        const m = /^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/.exec(coords);
-        if (m) { lat = parseFloat(m[1]); lng = parseFloat(m[2]); }
+        const parsedCoords = parseCoordsText(coords);
+        const lat = parsedCoords ? parsedCoords.lat : null;
+        const lng = parsedCoords ? parsedCoords.lng : null;
         const km = typeof kmRaw === "number" ? kmRaw : parseFloat(kmRaw);
         chicos.push({ nombre: titleCase(c), localidad: titleCase(d), dias, institucion: normInstitucionNombre(institucionTxt), lat, lng, km: isNaN(km) ? null : km });
         i++;
@@ -1014,8 +1028,8 @@ function buildImportResult(workbook, existingPrestaciones, fallbackLat, fallback
     rows.forEach((r) => {
       const a = normText((r || [])[0]).toUpperCase();
       if (a.includes("INSTITUCION")) {
-        const m = /^(-?\d+\.?\d*)\s*,\s*(-?\d+\.?\d*)$/.exec(normText(r[1]));
-        if (m) { lat0 = parseFloat(m[1]); lng0 = parseFloat(m[2]); }
+        const parsed = parseCoordsText(normText(r[1]));
+        if (parsed) { lat0 = parsed.lat; lng0 = parsed.lng; }
       }
     });
   });
@@ -1059,7 +1073,12 @@ function buildImportResult(workbook, existingPrestaciones, fallbackLat, fallback
     };
   });
 
-  return { prestacionesNuevas, recorridos: outRecorridos };
+  const sinCoordsPropias = outRecorridos.reduce(
+    (acc, r) => acc + r.chicos.filter((c) => c.lat === lat0 && c.lng === lng0).length,
+    0
+  );
+
+  return { prestacionesNuevas, recorridos: outRecorridos, sinCoordsPropias };
 }
 
 export default function App() {
@@ -1880,6 +1899,11 @@ export default function App() {
                     <div className="mt-4 rounded-lg px-3 py-2.5 text-[12px]" style={{ background: "#FBF1E6", color: "#8A5A24" }}>
                       {importPreview.prestacionesNuevas.length} prestación(es) nueva(s) sin sede asignada: {importPreview.prestacionesNuevas.map((p) => p.nombre).join(", ")}.
                       Las vas a poder asignar a una sede en Configuración → Prestaciones después de importar.
+                    </div>
+                  )}
+                  {importPreview.sinCoordsPropias > 0 && (
+                    <div className="mt-4 rounded-lg px-3 py-2.5 text-[12px]" style={{ background: "#FBEEEC", color: "#B5533E" }}>
+                      {importPreview.sinCoordsPropias} concurrente(s) no tenían coordenadas legibles en la planilla — quedaron con la ubicación de la institución en su lugar. Revisá esa columna en el Excel (a veces el signo menos se pega distinto) o cargalas a mano después con "Coordenadas manuales".
                     </div>
                   )}
                   <div className="mt-5 pt-4 border-t border-[#EDF0ED] flex items-center justify-between gap-3">

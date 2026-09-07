@@ -1,0 +1,12 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // TEMPORAL para desarrollo: cualquiera con el link puede leer y escribir.
+    // Antes de publicar el sistema hay que cambiar esto para exigir que el
+    // usuario haya iniciado sesión (Firebase Authentication) — lo hacemos
+    // cuando conectemos el login real.
+    match /{document=**} {
+      allow read, write: if true;
+    }
+  }
+}

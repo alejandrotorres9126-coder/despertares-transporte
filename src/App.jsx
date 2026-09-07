@@ -1317,6 +1317,7 @@ export default function App() {
               Domicilio: c.domicilio,
               Institución: inst ? inst.nombre : "",
               "Distancia a institución (km)": c.kmDesde || 0,
+              "Distancia diaria concurrente (km)": c.kmDesde ? c.kmDesde * 2 : 0,
               "Km ida recorrido": r.kmIda,
               "Km diario recorrido": kmDiarioR,
               [`Km mensual recorrido (${diasPorMes} días)`]: Math.round(kmMensualR),
@@ -1412,13 +1413,14 @@ export default function App() {
     const marginX = 40, tableW = 515, top = 50, bottom = 792;
     const colDefs = [
       { key: "idx", label: "#", w: 14 },
-      { key: "nombre", label: "Concurrente", w: 78 },
-      { key: "dni", label: "DNI", w: 52 },
-      { key: "institucion", label: "Institución", w: 64 },
-      { key: "obraSocial", label: "O. social", w: 40 },
-      { key: "km", label: "Km", w: 34 },
-      { key: "dias", label: "Días", w: 95 },
-      { key: "prestacion", label: "Prestación", w: 90 },
+      { key: "nombre", label: "Concurrente", w: 74 },
+      { key: "dni", label: "DNI", w: 48 },
+      { key: "institucion", label: "Institución", w: 58 },
+      { key: "obraSocial", label: "O. social", w: 36 },
+      { key: "km", label: "Km", w: 30 },
+      { key: "dias", label: "Días", w: 82 },
+      { key: "kmDiario", label: "Km/día", w: 38 },
+      { key: "prestacion", label: "Prestación", w: 80 },
     ];
     let cursorX = marginX;
     const cols = colDefs.map((c) => {
@@ -1498,6 +1500,7 @@ export default function App() {
           institucion: inst ? inst.nombre : "-",
           obraSocial: c.obraSocial,
           km: c.kmDesde ? c.kmDesde.toFixed(1) : "-",
+          kmDiario: c.kmDesde ? (c.kmDesde * 2).toFixed(1) : "-",
           dias: c.dias,
           prestacion: c.prestacion,
         };

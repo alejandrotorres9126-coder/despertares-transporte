@@ -2212,9 +2212,14 @@ export default function App() {
             options={[{ value: "", label: "Sin especificar" }, ...localidades.map((l) => ({ value: l.nombre, label: `${l.nombre}, ${l.provincia}` }))]} />
           <Field label="Días de concurrencia" value={d.dias} onChange={(v) => setModal({ ...modal, draft: { ...d, dias: v } })} />
           <Field label="Domicilio" value={d.domicilio} onChange={(v) => setModal({ ...modal, draft: { ...d, domicilio: v } })} />
+          {typeof d.lat === "number" && typeof d.lng === "number" && (
+            <p className="text-[11.5px] flex items-center gap-1" style={{ color: GREEN }}>
+              <MapPin size={12} /> Coordenadas guardadas: {d.lat.toFixed(6)}, {d.lng.toFixed(6)}
+            </p>
+          )}
           <Field label="Coordenadas manuales (lat, lng)" value={d.coordsManual || ""} onChange={(v) => setModal({ ...modal, draft: { ...d, coordsManual: v } })} />
           <p className="text-[11px]" style={{ color: MUTED }}>
-            Usar solo si el concurrente no tiene domicilio con calle y número (ej. zona rural). Formato: -26.144265, -59.599022 — si se completa, tiene prioridad sobre el domicilio.
+            Dejar vacío para mantener las coordenadas guardadas de arriba. Completar solo para reemplazarlas (ej. si el domicilio no tiene calle y número, zona rural). Formato: -26.144265, -59.599022 — si se completa, tiene prioridad sobre el domicilio.
           </p>
           <Field label="Distancia a la institución (km)" type="number" value={d.kmDesde || 0} onChange={(v) => setModal({ ...modal, draft: { ...d, kmDesde: v } })} />
           <p className="text-[11px]" style={{ color: MUTED }}>En la versión final, el domicilio se geocodifica solo al guardar. Obra social, localidad, institución y prestación se cargan y editan desde Datos generales.</p>

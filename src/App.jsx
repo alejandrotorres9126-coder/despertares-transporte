@@ -982,8 +982,15 @@ function parseTransporteSheet(rows) {
         if (d === "") { i++; continue; }
         const dias = normText(r[4]);
         const institucionTxt = normText(r[5]);
-        const coords = normText(r[6]);
-        const kmRaw = r[7];
+        // Normalmente las coordenadas están en la columna G (índice 6), pero algunos bloques
+        // tienen una columna extra (ej. "OBSERVACIÓN") antes, corriendo todo un lugar. Probamos
+        // primero la posición habitual y, si no matchea, buscamos en las columnas vecinas.
+        let coordsIdx = null;
+        for (const ci of [6, 7, 8, 5, 9]) {
+          if (parseCoordsText(normText(r[ci]))) { coordsIdx = ci; break; }
+        }
+        const coords = normText(r[coordsIdx !== null ? coordsIdx : 6]);
+        const kmRaw = r[coordsIdx !== null ? coordsIdx + 1 : 7];
         const parsedCoords = parseCoordsText(coords);
         const lat = parsedCoords ? parsedCoords.lat : null;
         const lng = parsedCoords ? parsedCoords.lng : null;
@@ -1348,8 +1355,8 @@ export default function App() {
   }
 
   function pdfTrunc(text, widthPt, size) {
-    const avgCharW = size * 0.52;
-    const maxChars = Math.max(3, Math.floor((widthPt - 4) / avgCharW));
+    const avgCharW = size * 0.62;
+    const maxChars = Math.max(3, Math.floor((widthPt - 6) / avgCharW));
     const t = String(text || "");
     return t.length <= maxChars ? t : t.slice(0, maxChars - 2) + "..";
   }

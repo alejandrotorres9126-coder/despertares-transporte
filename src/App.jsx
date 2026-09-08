@@ -441,9 +441,9 @@ const RECORRIDOS_INICIAL = [
   },
 ];
 const USUARIOS_INICIAL = [
-  { id: "u1", nombre: "Maldonado Omar", rol: "Chofer", recorridoId: "r1", usuario: "momar" },
-  { id: "u2", nombre: "Zacarias Gustavo", rol: "Auxiliar", recorridoId: "r1", usuario: "zgustavo" },
-  { id: "u3", nombre: "Blume Osvaldo", rol: "Chofer", recorridoId: "r2", usuario: "bosvaldo" },
+  { id: "u1", nombre: "Maldonado Omar", rol: "Chofer", recorridoId: "r1", usuario: "momar", password: "1234" },
+  { id: "u2", nombre: "Zacarias Gustavo", rol: "Auxiliar", recorridoId: "r1", usuario: "zgustavo", password: "1234" },
+  { id: "u3", nombre: "Blume Osvaldo", rol: "Chofer", recorridoId: "r2", usuario: "bosvaldo", password: "1234" },
 ];
 
 /* ---------- pequeños componentes reutilizables ---------- */
@@ -758,7 +758,7 @@ const emptyChico = (instituciones, prestaciones, localidades, obrasSociales) => 
     dias: "", institucionId, kmDesde: 0, lat: inst?.lat, lng: inst?.lng, coordsManual: "",
   };
 };
-const emptyUsuario = (recorridos) => ({ nombre: "", rol: "Chofer", recorridoId: recorridos[0]?.id || "", usuario: "" });
+const emptyUsuario = (recorridos) => ({ nombre: "", rol: "Chofer", recorridoId: recorridos[0]?.id || "", usuario: "", password: "" });
 const emptyInstitucion = () => ({ nombre: "", direccion: "", lat: -33.08387, lng: -68.47312 });
 const emptyPrestacion = (instituciones) => ({ nombre: "", institucionId: instituciones[0]?.id || "" });
 const emptyLocalidad = () => ({ nombre: "", provincia: "" });
@@ -793,10 +793,28 @@ function LoginDecoration() {
   );
 }
 
-function Login({ onEnter }) {
+function Login({ onEnter, usuarios }) {
   const [role, setRole] = useState("admin");
   const [usuario, setUsuario] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    setError("");
+    if (role === "admin") {
+      onEnter("admin", null);
+      return;
+    }
+    const match = usuarios.find(
+      (u) => u.usuario.trim().toLowerCase() === usuario.trim().toLowerCase() && (u.password || "") === password
+    );
+    if (match) {
+      onEnter("usuario", match);
+    } else {
+      setError("Usuario o contraseña incorrectos.");
+    }
+  }
 
   return (
     <div className="min-h-screen w-full flex" style={{ background: "#F3F5F1" }}>
@@ -829,22 +847,22 @@ function Login({ onEnter }) {
           </p>
 
           <div className="mt-6 flex rounded-full p-1" style={{ background: "#EEF3EC" }}>
-            <button onClick={() => setRole("admin")} className="flex-1 flex items-center justify-center gap-1.5 text-[12.5px] rounded-full py-2"
+            <button onClick={() => { setRole("admin"); setError(""); }} className="flex-1 flex items-center justify-center gap-1.5 text-[12.5px] rounded-full py-2"
               style={{ background: role === "admin" ? "#FFFFFF" : "transparent", color: role === "admin" ? GREEN : "#5B6B63", fontWeight: role === "admin" ? 600 : 400, boxShadow: role === "admin" ? "0 1px 2px rgba(0,0,0,0.06)" : "none" }}>
               <Settings size={13} /> Administrador
             </button>
-            <button onClick={() => setRole("usuario")} className="flex-1 flex items-center justify-center gap-1.5 text-[12.5px] rounded-full py-2"
+            <button onClick={() => { setRole("usuario"); setError(""); }} className="flex-1 flex items-center justify-center gap-1.5 text-[12.5px] rounded-full py-2"
               style={{ background: role === "usuario" ? "#FFFFFF" : "transparent", color: role === "usuario" ? GREEN : "#5B6B63", fontWeight: role === "usuario" ? 600 : 400, boxShadow: role === "usuario" ? "0 1px 2px rgba(0,0,0,0.06)" : "none" }}>
               <Bus size={13} /> Chofer / Auxiliar
             </button>
           </div>
 
-          <form onSubmit={(e) => { e.preventDefault(); onEnter(role); }} className="mt-6 space-y-3.5">
+          <form onSubmit={handleSubmit} className="mt-6 space-y-3.5">
             <label className="block">
               <span className="text-[11px] uppercase tracking-wide" style={{ color: MUTED }}>Usuario</span>
               <div className="mt-1 flex items-center gap-2 rounded-lg border border-[#E2E7E2] px-3 py-2.5 focus-within:border-[#3F6C51]">
                 <User size={15} color={MUTED} />
-                <input value={usuario} onChange={(e) => setUsuario(e.target.value)} placeholder={role === "admin" ? "admin" : "ej. ribanez"}
+                <input value={usuario} onChange={(e) => setUsuario(e.target.value)} placeholder={role === "admin" ? "admin" : "ej. momar"}
                   className="w-full text-[13.5px] outline-none" style={{ color: INK }} />
               </div>
             </label>
@@ -856,6 +874,8 @@ function Login({ onEnter }) {
                   className="w-full text-[13.5px] outline-none" style={{ color: INK }} />
               </div>
             </label>
+
+            {error && <p className="text-[12px]" style={{ color: "#B5533E" }}>{error}</p>}
 
             <div className="flex items-center justify-between pt-1">
               <label className="flex items-center gap-2 text-[12px]" style={{ color: MUTED }}>
@@ -1091,6 +1111,7 @@ function buildImportResult(workbook, existingPrestaciones, fallbackLat, fallback
 export default function App() {
   const [screen, setScreen] = useState("login");
   const [role, setRole] = useState("admin");
+  const [loggedInUsuario, setLoggedInUsuario] = useState(null);
   const [turno, setTurno] = useState(null);
   const [section, setSection] = useState("recorridos");
 
@@ -1535,20 +1556,108 @@ export default function App() {
   const d = modal?.draft;
 
   if (screen === "login") {
-    return <Login onEnter={(r) => { setRole(r); setScreen("landing"); }} />;
+    return <Login usuarios={usuarios} onEnter={(r, matched) => { setRole(r); setLoggedInUsuario(matched); setScreen("landing"); }} />;
   }
 
   if (screen === "landing") {
     return <Landing onEnter={(t) => { setTurno(t); setScreen("app"); }} />;
   }
 
-  if (!recorridosReady || !recorrido) {
+  if (!recorridosReady) {
     return (
       <div className="min-h-screen w-full flex items-center justify-center" style={{ background: "#F3F5F1" }}>
         <style>{FONT_IMPORT}</style>
         <div className="text-center">
           <img src={LOGO_URL} alt="Despertares" className="h-12 mx-auto object-contain opacity-70" />
           <p className="mt-4 text-[13px]" style={{ color: MUTED }}>Cargando datos...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (role === "usuario") {
+    const misRecorrido = recorridos.find((r) => r.id === loggedInUsuario?.recorridoId);
+    return (
+      <div className="min-h-screen w-full flex flex-col" style={{ background: "#F3F5F1", fontFamily: "Inter" }}>
+        <style>{FONT_IMPORT}</style>
+        <div className="flex items-center justify-between px-5 py-4 bg-white border-b border-[#E2E7E2]">
+          <div className="flex items-center gap-2">
+            <img src={LOGO_URL} alt="Despertares" className="h-7 w-auto object-contain" />
+            <div>
+              <div className="text-[14px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>{loggedInUsuario?.nombre}</div>
+              <div className="text-[11px] flex items-center gap-1" style={{ color: MUTED }}>
+                {loggedInUsuario?.rol} · {turno === "mañana" ? <Sun size={11} /> : <Moon size={11} />} Turno {turno}
+              </div>
+            </div>
+          </div>
+          <button onClick={() => { setLoggedInUsuario(null); setScreen("login"); }}
+            className="flex items-center gap-1.5 text-[12px] rounded-full px-3 py-1.5 border" style={{ borderColor: "#E2E7E2", color: MUTED }}>
+            <LogOut size={13} /> Salir
+          </button>
+        </div>
+
+        {!misRecorrido ? (
+          <div className="flex-1 flex items-center justify-center px-6 text-center">
+            <p className="text-[13.5px]" style={{ color: MUTED }}>Todavía no tenés un recorrido asignado. Hablá con el administrador.</p>
+          </div>
+        ) : (
+          <main className="flex-1 overflow-y-auto">
+            <div className="max-w-[720px] mx-auto px-4 sm:px-8 py-6">
+              <div className="text-[11px] uppercase tracking-wider" style={{ color: MUTED }}>{misRecorrido.localidad}</div>
+              <h1 className="text-[22px] sm:text-[26px] mt-1" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>{misRecorrido.nombre}</h1>
+
+              <div className="mt-5 grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { icon: User, label: "Chofer", value: misRecorrido.chofer },
+                  { icon: User, label: "Auxiliar", value: misRecorrido.auxiliar },
+                  { icon: Bus, label: "Vehículo", value: misRecorrido.vehiculo || "-" },
+                  { icon: CreditCard, label: "Patente", value: misRecorrido.patente },
+                ].map((f, i) => (
+                  <div key={i} className="rounded-xl bg-white border border-[#E2E7E2] px-3.5 py-3">
+                    <div className="flex items-center gap-1.5" style={{ color: MUTED }}><f.icon size={12.5} /><span className="text-[10.5px] uppercase tracking-wide">{f.label}</span></div>
+                    <div className="text-[13.5px] mt-1" style={{ color: INK, fontWeight: 500 }}>{f.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-6 rounded-xl bg-white border border-[#E2E7E2] p-5">
+                <h3 className="text-[15px] mb-4" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>Mapa del recorrido</h3>
+                <RouteMap recorrido={misRecorrido} instituciones={instituciones} />
+              </div>
+
+              <div className="mt-6 rounded-xl bg-white border border-[#E2E7E2] overflow-hidden">
+                <div className="px-5 py-4 border-b border-[#E2E7E2]">
+                  <h3 className="text-[15px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>Concurrentes ({misRecorrido.chicos.length})</h3>
+                </div>
+                <div className="divide-y divide-[#EDF0ED]">
+                  {misRecorrido.chicos.map((c, i) => (
+                    <div key={i} className="px-5 py-3.5">
+                      <div className="flex items-center gap-1.5 text-[14px]" style={{ color: INK, fontWeight: 500 }}>
+                        <span className="inline-flex items-center justify-center rounded-full text-[10px] w-4 h-4 shrink-0" style={{ background: "#EEF3EC", color: GREEN }}>{i + 1}</span>
+                        {c.nombre}
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-[12px]" style={{ color: "#5B6B63" }}>
+                        {c.dias && <span className="flex items-center gap-1"><Calendar size={11} /> {c.dias}</span>}
+                        {(c.domicilio || c.localidad) && <span className="flex items-center gap-1"><MapPin size={11} /> {[c.domicilio, c.localidad].filter(Boolean).join(" · ")}</span>}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </main>
+        )}
+      </div>
+    );
+  }
+
+  if (!recorrido) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center" style={{ background: "#F3F5F1" }}>
+        <style>{FONT_IMPORT}</style>
+        <div className="text-center">
+          <img src={LOGO_URL} alt="Despertares" className="h-12 mx-auto object-contain opacity-70" />
+          <p className="mt-4 text-[13px]" style={{ color: MUTED }}>Todavía no hay recorridos cargados.</p>
         </div>
       </div>
     );
@@ -1595,7 +1704,7 @@ export default function App() {
             );
           })}
         </div>
-        <button onClick={() => setScreen("login")}
+        <button onClick={() => { setLoggedInUsuario(null); setScreen("login"); }}
           className="flex flex-col items-center justify-center gap-0.5 rounded-xl w-14 h-14 shrink-0 mt-auto">
           <LogOut size={17} color={MUTED} />
           <span className="text-[9.5px]" style={{ color: MUTED }}>Salir</span>
@@ -1649,7 +1758,7 @@ export default function App() {
               </div>
             )}
 
-            <button onClick={() => { setMobileNavOpen(false); setScreen("login"); }}
+            <button onClick={() => { setMobileNavOpen(false); setLoggedInUsuario(null); setScreen("login"); }}
               className="flex items-center gap-3 rounded-xl px-3 py-3 text-left mt-4">
               <LogOut size={17} color={MUTED} />
               <span className="text-[14px]" style={{ color: INK }}>Salir</span>
@@ -2234,7 +2343,8 @@ export default function App() {
           <SelectField label="Recorrido asignado" value={d.recorridoId} onChange={(v) => setModal({ ...modal, draft: { ...d, recorridoId: v } })}
             options={recorridos.map((r) => ({ value: r.id, label: r.nombre }))} />
           <Field label="Usuario" value={d.usuario} onChange={(v) => setModal({ ...modal, draft: { ...d, usuario: v } })} />
-          <p className="text-[11px]" style={{ color: MUTED }}>La contraseña se define y gestiona de forma segura en el sistema real (no en este prototipo).</p>
+          <Field label="Contraseña" type="password" value={d.password || ""} onChange={(v) => setModal({ ...modal, draft: { ...d, password: v } })} />
+          <p className="text-[11px]" style={{ color: MUTED }}>Con este usuario y contraseña, el chofer/auxiliar va a poder entrar y ver únicamente el recorrido asignado.</p>
         </Modal>
       )}
 

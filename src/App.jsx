@@ -1008,21 +1008,29 @@ function parseCoordsText(text) {
 const IMPORT_MARKERS = ["Datos de veh", "Datos chofer", "Datos auxiliar", "Datos Auxiliar", "AUXILIAR:", "TRANSPORTE:", "TURNO:", "Horario de"];
 function isImportMarker(text) { return IMPORT_MARKERS.some((m) => text.startsWith(m)); }
 
+function findMarkerCol(row) {
+  for (let c = 0; c <= 4; c++) {
+    if (normText((row || [])[c]) === "TRANSPORTE:") return c;
+  }
+  return null;
+}
+
 function parseTransporteSheet(rows) {
   const recorridos = [];
   const n = rows.length;
   let i = 0;
   while (i < n) {
     const row = rows[i] || [];
-    const c2 = normText(row[2]);
-    if (c2 === "TRANSPORTE:") {
-      let nombre = normText(row[3]) || normText(row[4]);
+    const markerCol = findMarkerCol(row);
+    if (markerCol !== null) {
+      const nombreCol = markerCol, localidadCol = markerCol + 1, diasCol = markerCol + 2, institucionCol = markerCol + 3;
+      let nombre = normText(row[markerCol + 1]) || normText(row[markerCol + 2]);
       i++;
-      if (i < n && normText((rows[i] || [])[2]).toUpperCase().startsWith("TURNO:")) i++;
-      if (i < n && normText((rows[i] || [])[2]).includes("Horario de salida")) i++;
-      if (i < n && normText((rows[i] || [])[2]).includes("Horario de llegada")) i++;
+      if (i < n && normText((rows[i] || [])[markerCol]).toUpperCase().startsWith("TURNO:")) i++;
+      if (i < n && normText((rows[i] || [])[markerCol]).includes("Horario de salida")) i++;
+      if (i < n && normText((rows[i] || [])[markerCol]).includes("Horario de llegada")) i++;
       while (i < n) {
-        const c2c = normText((rows[i] || [])[2]);
+        const c2c = normText((rows[i] || [])[nombreCol]);
         if (c2c === "TRANSPORTE:") break;
         if (c2c === "" || c2c.toUpperCase() === "N°" || c2c.toUpperCase() === "NOMBRE Y APELLIDO" || isImportMarker(c2c)) { i++; continue; }
         break;
@@ -1030,21 +1038,21 @@ function parseTransporteSheet(rows) {
       const chicos = [];
       while (i < n) {
         const r = rows[i] || [];
-        const c = normText(r[2]);
-        const d = normText(r[3]);
+        const c = normText(r[nombreCol]);
+        const d = normText(r[localidadCol]);
         if (c === "" || isImportMarker(c)) break;
         if (d === "") { i++; continue; }
-        const dias = normText(r[4]);
-        const institucionTxt = normText(r[5]);
-        // Normalmente las coordenadas están en la columna G (índice 6), pero algunos bloques
-        // tienen una columna extra (ej. "OBSERVACIÓN") antes, corriendo todo un lugar. Probamos
-        // primero la posición habitual y, si no matchea, buscamos en las columnas vecinas.
+        const dias = normText(r[diasCol]);
+        const institucionTxt = normText(r[institucionCol]);
+        // Normalmente las coordenadas están una columna después de la institución, pero algunos
+        // bloques tienen una columna extra (ej. "OBSERVACIÓN") antes, corriendo todo un lugar.
+        // Probamos primero la posición habitual y, si no matchea, buscamos en las columnas vecinas.
         let coordsIdx = null;
-        for (const ci of [6, 7, 8, 5, 9]) {
+        for (const ci of [institucionCol + 1, institucionCol + 2, institucionCol + 3, institucionCol, institucionCol + 4]) {
           if (parseCoordsText(normText(r[ci]))) { coordsIdx = ci; break; }
         }
-        const coords = normText(r[coordsIdx !== null ? coordsIdx : 6]);
-        const kmRaw = r[coordsIdx !== null ? coordsIdx + 1 : 7];
+        const coords = normText(r[coordsIdx !== null ? coordsIdx : institucionCol + 1]);
+        const kmRaw = r[coordsIdx !== null ? coordsIdx + 1 : institucionCol + 2];
         const parsedCoords = parseCoordsText(coords);
         const lat = parsedCoords ? parsedCoords.lat : null;
         const lng = parsedCoords ? parsedCoords.lng : null;
@@ -1055,7 +1063,7 @@ function parseTransporteSheet(rows) {
       let vehiculo = "", chofer = "", auxiliar = "";
       const stop = i + 10;
       while (i < n && i < stop) {
-        const c2b = normText((rows[i] || [])[2]);
+        const c2b = normText((rows[i] || [])[nombreCol]);
         if (c2b.startsWith("Datos de veh")) vehiculo = c2b.includes(":") ? c2b.split(":").slice(1).join(":").trim() : "";
         else if (c2b.startsWith("Datos chofer")) chofer = c2b.includes(":") ? c2b.split(":").slice(1).join(":").trim() : "";
         else if (c2b.startsWith("Datos auxiliar") || c2b.startsWith("Datos Auxiliar") || c2b.startsWith("AUXILIAR:")) auxiliar = c2b.includes(":") ? c2b.split(":").slice(1).join(":").trim() : "";

@@ -6,7 +6,7 @@ import {
   Bus, User, MapPin, CreditCard, HeartPulse, ChevronRight, Milestone,
   Calendar, Navigation, Search, Plus, Pencil, X, Map as MapIcon, List, Trash2,
   Home, Sun, Moon, Users, Settings, UserPlus, LogOut, Building2, Menu,
-  Download, Printer, FileSpreadsheet, Upload, Lock, Pin, PinOff, Route,
+  Download, Printer, FileSpreadsheet, Upload, Lock, Pin, PinOff, Route, Crosshair,
 } from "lucide-react";
 
 const FONT_IMPORT = `
@@ -589,8 +589,11 @@ function projectLatLng(points, viewW = 100, viewH = 75, pad = 10) {
   }));
 }
 
-function RouteMap({ recorrido, instituciones }) {
+function RouteMap({ recorrido, instituciones, focusChicoIndex }) {
   const mapDivRef = React.useRef(null);
+  const mapObjRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+  const infoWindowRef = React.useRef(null);
   const [status, setStatus] = useState("loading"); // loading | ready | error
   const [errorMsg, setErrorMsg] = useState("");
   const [routeWarning, setRouteWarning] = useState("");
@@ -618,9 +621,12 @@ function RouteMap({ recorrido, instituciones }) {
           mapTypeControl: false,
           streetViewControl: false,
         });
+        mapObjRef.current = map;
+        infoWindowRef.current = new maps.InfoWindow();
 
         const bounds = new maps.LatLngBounds();
         const markers = [];
+        markersRef.current = markers;
 
         // marcadores de domicilios — se numeran después, según el orden optimizado
         recorrido.chicos.forEach((c) => {
@@ -720,6 +726,34 @@ function RouteMap({ recorrido, instituciones }) {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recorrido.id]);
+
+  useEffect(() => {
+    const map = mapObjRef.current;
+    const markers = markersRef.current;
+    if (!map || !window.google) return;
+    if (focusChicoIndex === null || focusChicoIndex === undefined) {
+      if (markers.length) {
+        const bounds = new window.google.maps.LatLngBounds();
+        markers.forEach((m) => bounds.extend(m.getPosition()));
+        map.fitBounds(bounds);
+      }
+      if (infoWindowRef.current) infoWindowRef.current.close();
+      return;
+    }
+    const marker = markers[focusChicoIndex];
+    const chico = recorrido.chicos[focusChicoIndex];
+    if (marker && chico) {
+      map.panTo(marker.getPosition());
+      map.setZoom(17);
+      if (infoWindowRef.current) {
+        infoWindowRef.current.setContent(
+          `<div style="font-size:12px;font-weight:600;color:#23342E;padding:2px 4px;">${chico.nombre}</div>`
+        );
+        infoWindowRef.current.open({ map, anchor: marker });
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusChicoIndex]);
 
   if (status === "error") {
     return (
@@ -1125,10 +1159,14 @@ export default function App() {
   useEffect(() => {
     if (!selectedId && recorridos.length > 0) setSelectedId(recorridos[0].id);
   }, [recorridos, selectedId]);
+  useEffect(() => {
+    setFocusChicoIndex(null);
+  }, [selectedId]);
   const [diasPorMes, setDiasPorMes] = useState(20);
   const [query, setQuery] = useState("");
   const [view, setView] = useState("mapa");
   const [expandedChico, setExpandedChico] = useState(null);
+  const [focusChicoIndex, setFocusChicoIndex] = useState(null);
   const [recorridosPanelOpen, setRecorridosPanelOpen] = useState(true);
   const [optimizando, setOptimizando] = useState(false);
   const [optimizarMsg, setOptimizarMsg] = useState("");
@@ -1831,7 +1869,7 @@ export default function App() {
             )}
 
             <main className="flex-1 overflow-y-auto">
-              <div className="max-w-[820px] mx-auto px-4 sm:px-8 py-6 sm:py-8">
+              <div className="mx-auto px-4 sm:px-8 py-6 sm:py-8 transition-all" style={{ maxWidth: recorridosPanelOpen ? 820 : 1400 }}>
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <div className="text-[11px] uppercase tracking-wider" style={{ color: MUTED }}>{recorrido.localidad}</div>
@@ -1875,7 +1913,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="mt-7 grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5">
+                <div className="mt-7 grid grid-cols-1 gap-5" style={{ gridTemplateColumns: isDesktop ? (recorridosPanelOpen ? "1.15fr 0.85fr" : "0.7fr 1.3fr") : undefined }}>
                   <div className="rounded-xl bg-white border border-[#E2E7E2] overflow-hidden">
                     <div className="px-5 py-4 border-b border-[#E2E7E2] flex items-center justify-between gap-2 flex-wrap">
                       <h3 className="text-[15px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>Concurrentes del recorrido</h3>
@@ -1904,10 +1942,17 @@ export default function App() {
                               className="w-full flex items-center justify-between gap-2 text-left"
                             >
                               <span className="text-[14px] flex items-center gap-1.5 min-w-0" style={{ color: INK, fontWeight: 500 }}>
-                                <span className="inline-flex items-center justify-center rounded-full text-[10px] w-4 h-4 shrink-0" style={{ background: "#EEF3EC", color: GREEN }}>{i + 1}</span>
+                                <span className="inline-flex items-center justify-center rounded-full text-[10px] w-4 h-4 shrink-0" style={{ background: focusChicoIndex === i ? "#FBF1E6" : "#EEF3EC", color: focusChicoIndex === i ? OCHRE : GREEN }}>{i + 1}</span>
                                 <span className="truncate">{c.nombre}</span>
                               </span>
-                              <span className="flex items-center gap-2 shrink-0">
+                              <span className="flex items-center gap-1.5 shrink-0">
+                                <span
+                                  onClick={(e) => { e.stopPropagation(); setView("mapa"); setFocusChicoIndex(i); }}
+                                  className="flex items-center gap-1 text-[11px] rounded-full px-2.5 py-1"
+                                  style={{ background: focusChicoIndex === i ? OCHRE : "#EEF3EC", color: focusChicoIndex === i ? "#FFFFFF" : GREEN }}
+                                >
+                                  <Crosshair size={11} /> Ver ubicación
+                                </span>
                                 <span
                                   onClick={(e) => { e.stopPropagation(); setExpandedChico(isOpen ? null : i); }}
                                   className="text-[11px] rounded-full px-2.5 py-1 border"
@@ -1957,20 +2002,27 @@ export default function App() {
                   </div>
 
                   <div className="rounded-xl bg-white border border-[#E2E7E2] p-5">
-                    <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center justify-between mb-4 gap-2 flex-wrap">
                       <h3 className="text-[15px]" style={{ fontFamily: "Fraunces", color: INK, fontWeight: 500 }}>
                         {view === "diagrama" ? "Recorrido esquemático" : "Mapa del recorrido"}
                       </h3>
-                      <div className="flex items-center rounded-full border border-[#E2E7E2] p-0.5">
-                        <button onClick={() => setView("diagrama")} className="p-1.5 rounded-full" style={{ background: view === "diagrama" ? "#EEF3EC" : "transparent" }}>
-                          <List size={13} color={view === "diagrama" ? GREEN : MUTED} />
-                        </button>
-                        <button onClick={() => setView("mapa")} className="p-1.5 rounded-full" style={{ background: view === "mapa" ? "#EEF3EC" : "transparent" }}>
-                          <MapIcon size={13} color={view === "mapa" ? GREEN : MUTED} />
-                        </button>
+                      <div className="flex items-center gap-2">
+                        {view === "mapa" && focusChicoIndex !== null && (
+                          <button onClick={() => setFocusChicoIndex(null)} className="text-[11px] rounded-full px-2.5 py-1 border" style={{ borderColor: "#E2E7E2", color: MUTED }}>
+                            Ver todo el recorrido
+                          </button>
+                        )}
+                        <div className="flex items-center rounded-full border border-[#E2E7E2] p-0.5">
+                          <button onClick={() => setView("diagrama")} className="p-1.5 rounded-full" style={{ background: view === "diagrama" ? "#EEF3EC" : "transparent" }}>
+                            <List size={13} color={view === "diagrama" ? GREEN : MUTED} />
+                          </button>
+                          <button onClick={() => setView("mapa")} className="p-1.5 rounded-full" style={{ background: view === "mapa" ? "#EEF3EC" : "transparent" }}>
+                            <MapIcon size={13} color={view === "mapa" ? GREEN : MUTED} />
+                          </button>
+                        </div>
                       </div>
                     </div>
-                    {view === "diagrama" ? <RouteDiagram recorrido={recorrido} instituciones={instituciones} /> : <RouteMap recorrido={recorrido} instituciones={instituciones} />}
+                    {view === "diagrama" ? <RouteDiagram recorrido={recorrido} instituciones={instituciones} /> : <RouteMap recorrido={recorrido} instituciones={instituciones} focusChicoIndex={focusChicoIndex} />}
                   </div>
                 </div>
               </div>
